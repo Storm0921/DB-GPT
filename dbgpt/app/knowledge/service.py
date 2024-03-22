@@ -1,7 +1,6 @@
 import json
 import logging
 from datetime import datetime
-from enum import Enum
 from typing import List
 
 from dbgpt._private.config import Config
@@ -17,7 +16,6 @@ from dbgpt.app.knowledge.request.request import (
     DocumentSyncRequest,
     KnowledgeDocumentRequest,
     KnowledgeSpaceRequest,
-    KnowledgeSyncRequest,
     SpaceArgumentRequest,
 )
 from dbgpt.app.knowledge.request.response import (
@@ -25,11 +23,12 @@ from dbgpt.app.knowledge.request.response import (
     DocumentQueryResponse,
     SpaceQueryResponse,
 )
-from dbgpt.app.knowledge.space_db import KnowledgeSpaceDao, KnowledgeSpaceEntity
 from dbgpt.component import ComponentType
 from dbgpt.configs.model_config import EMBEDDING_MODEL_CONFIG
+from dbgpt.core import Chunk
 from dbgpt.model import DefaultLLMClient
-from dbgpt.rag.chunk import Chunk
+from dbgpt.rag.assembler.embedding import EmbeddingAssembler
+from dbgpt.rag.assembler.summary import SummaryAssembler
 from dbgpt.rag.chunk_manager import ChunkParameters
 from dbgpt.rag.embedding.embedding_factory import EmbeddingFactory
 from dbgpt.rag.knowledge.base import ChunkStrategy, KnowledgeType
@@ -38,11 +37,13 @@ from dbgpt.rag.text_splitter.text_splitter import (
     RecursiveCharacterTextSplitter,
     SpacyTextSplitter,
 )
-from dbgpt.serve.rag.assembler.embedding import EmbeddingAssembler
-from dbgpt.serve.rag.assembler.summary import SummaryAssembler
+from dbgpt.serve.rag.api.schemas import KnowledgeSyncRequest
+from dbgpt.serve.rag.models.models import KnowledgeSpaceDao, KnowledgeSpaceEntity
+from dbgpt.serve.rag.service.service import Service, SyncStatus
 from dbgpt.storage.vector_store.base import VectorStoreConfig
 from dbgpt.storage.vector_store.connector import VectorStoreConnector
 from dbgpt.util.executor_utils import ExecutorFactory, blocking_func_to_async
+from dbgpt.util.tracer import root_tracer, trace
 
 knowledge_space_dao = KnowledgeSpaceDao()
 knowledge_document_dao = KnowledgeDocumentDao()
@@ -50,13 +51,6 @@ document_chunk_dao = DocumentChunkDao()
 
 logger = logging.getLogger(__name__)
 CFG = Config()
-
-
-class SyncStatus(Enum):
-    TODO = "TODO"
-    FAILED = "FAILED"
-    RUNNING = "RUNNING"
-    FINISHED = "FINISHED"
 
 
 # default summary max iteration call with llm.
@@ -87,8 +81,8 @@ class KnowledgeService:
         spaces = knowledge_space_dao.get_knowledge_space(query)
         if len(spaces) > 0:
             raise Exception(f"space name:{request.name} have already named")
-        knowledge_space_dao.create_knowledge_space(request)
-        return True
+        space_id = knowledge_space_dao.create_knowledge_space(request)
+        return space_id
 
     def create_knowledge_document(self, space, request: KnowledgeDocumentRequest):
         """create knowledge document
@@ -198,7 +192,9 @@ class KnowledgeService:
         return res
 
     def batch_document_sync(
-        self, space_name, sync_requests: List[KnowledgeSyncRequest]
+        self,
+        space_name,
+        sync_requests: List[KnowledgeSyncRequest],
     ) -> List[int]:
         """batch sync knowledge document chunk into vector store
         Args:
@@ -335,7 +331,11 @@ class KnowledgeService:
         )
         from dbgpt.storage.vector_store.base import VectorStoreConfig
 
-        config = VectorStoreConfig(name=space_name, embedding_fn=embedding_fn)
+        config = VectorStoreConfig(
+            name=space_name,
+            embedding_fn=embedding_fn,
+            max_chunks_once_load=CFG.KNOWLEDGE_MAX_CHUNKS_ONCE_LOAD,
+        )
         vector_store_connector = VectorStoreConnector(
             vector_store_type=CFG.VECTOR_STORE_TYPE,
             vector_store_config=config,
@@ -347,6 +347,7 @@ class KnowledgeService:
         assembler = EmbeddingAssembler.load_from_knowledge(
             knowledge=knowledge,
             chunk_parameters=chunk_parameters,
+            embeddings=embedding_fn,
             vector_store_connector=vector_store_connector,
         )
         chunk_docs = assembler.get_chunks()
@@ -423,7 +424,15 @@ class KnowledgeService:
             - space_id: space id
             - space_request: KnowledgeSpaceRequest
         """
-        knowledge_space_dao.update_knowledge_space(space_id, space_request)
+        entity = KnowledgeSpaceEntity(
+            id=space_id,
+            name=space_request.name,
+            vector_type=space_request.vector_type,
+            desc=space_request.desc,
+            owner=space_request.owner,
+        )
+
+        knowledge_space_dao.update_knowledge_space(entity)
 
     def delete_space(self, space_name: str):
         """delete knowledge space
@@ -499,6 +508,7 @@ class KnowledgeService:
         res.page = request.page
         return res
 
+    @trace("async_doc_embedding")
     def async_doc_embedding(self, assembler, chunk_docs, doc):
         """async document embedding into vector db
         Args:
@@ -511,7 +521,11 @@ class KnowledgeService:
             f"async doc embedding sync, doc:{doc.doc_name}, chunks length is {len(chunk_docs)}, begin embedding to vector store-{CFG.VECTOR_STORE_TYPE}"
         )
         try:
-            vector_ids = assembler.persist()
+            with root_tracer.start_span(
+                "app.knowledge.assembler.persist",
+                metadata={"doc": doc.doc_name, "chunks": len(chunk_docs)},
+            ):
+                vector_ids = assembler.persist()
             doc.status = SyncStatus.FINISHED.name
             doc.result = "document embedding success"
             if vector_ids is not None:

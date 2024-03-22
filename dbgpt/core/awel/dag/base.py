@@ -274,6 +274,8 @@ class DAGNode(DAGLifecycle, DependencyMixin, ViewMixin, ABC):
             node_id = self._dag._new_node_id()
         self._node_id: Optional[str] = node_id
         self._node_name: Optional[str] = node_name
+        if self._dag:
+            self._dag._append_node(self)
 
     @property
     def node_id(self) -> str:
@@ -421,12 +423,25 @@ class DAGNode(DAGLifecycle, DependencyMixin, ViewMixin, ABC):
     def __repr__(self):
         """Return the representation of current DAGNode."""
         cls_name = self.__class__.__name__
-        if self.node_name and self.node_name:
+        if self.node_id and self.node_name:
             return f"{cls_name}(node_id={self.node_id}, node_name={self.node_name})"
         if self.node_id:
             return f"{cls_name}(node_id={self.node_id})"
         if self.node_name:
             return f"{cls_name}(node_name={self.node_name})"
+        else:
+            return f"{cls_name}"
+
+    @property
+    def graph_str(self):
+        """Return the graph string of current DAGNode."""
+        cls_name = self.__class__.__name__
+        if self.node_id and self.node_name:
+            return f"{self.node_id}({cls_name},{self.node_name})"
+        if self.node_id:
+            return f"{self.node_id}({cls_name})"
+        if self.node_name:
+            return f"{self.node_name}_{cls_name}({cls_name})"
         else:
             return f"{cls_name}"
 
@@ -514,7 +529,7 @@ class DAGContext:
             raise ValueError("task_name can't be None")
         node_id = self._node_name_to_ids.get(task_name)
         if not node_id:
-            raise ValueError(f"Task name {task_name} not exists in DAG")
+            raise ValueError(f"Task name {task_name} not in DAG")
         task_output = self._task_outputs.get(node_id)
         if not task_output:
             raise ValueError(f"Task output for task {task_name} not exists")
@@ -695,6 +710,11 @@ class DAG:
         self.print_tree()
         return _visualize_dag(self, view=view, **kwargs)
 
+    def show(self, mermaid: bool = False) -> Any:
+        """Return the graph of current DAG."""
+        dot, mermaid_str = _get_graph(self)
+        return mermaid_str if mermaid else dot
+
     def __enter__(self):
         """Enter a DAG context."""
         DAGVar.enter_dag(self)
@@ -798,37 +818,50 @@ def _handle_dag_nodes(
         _handle_dag_nodes(is_down_to_up, level, node, func)
 
 
-def _visualize_dag(dag: DAG, view: bool = True, **kwargs) -> Optional[str]:
-    """Visualize the DAG.
-
-    Args:
-        dag (DAG): The DAG to visualize
-        view (bool, optional): Whether view the DAG graph. Defaults to True.
-
-    Returns:
-        Optional[str]: The filename of the DAG graph
-    """
+def _get_graph(dag: DAG):
     try:
         from graphviz import Digraph
     except ImportError:
         logger.warn("Can't import graphviz, skip visualize DAG")
-        return None
-
+        return None, None
     dot = Digraph(name=dag.dag_id)
+    mermaid_str = "graph TD;\n"  # Initialize Mermaid graph definition
     # Record the added edges to avoid adding duplicate edges
     added_edges = set()
 
     def add_edges(node: DAGNode):
+        nonlocal mermaid_str
         if node.downstream:
             for downstream_node in node.downstream:
                 # Check if the edge has been added
                 if (str(node), str(downstream_node)) not in added_edges:
                     dot.edge(str(node), str(downstream_node))
+                    mermaid_str += f"    {node.graph_str} --> {downstream_node.graph_str};\n"  # noqa
                     added_edges.add((str(node), str(downstream_node)))
                 add_edges(downstream_node)
 
     for root in dag.root_nodes:
         add_edges(root)
+    return dot, mermaid_str
+
+
+def _visualize_dag(
+    dag: DAG, view: bool = True, generate_mermaid: bool = True, **kwargs
+) -> Optional[str]:
+    """Visualize the DAG.
+
+    Args:
+        dag (DAG): The DAG to visualize
+        view (bool, optional): Whether view the DAG graph. Defaults to True.
+        generate_mermaid (bool, optional): Whether to generate a Mermaid syntax file.
+            Defaults to True.
+
+    Returns:
+        Optional[str]: The filename of the DAG graph
+    """
+    dot, mermaid_str = _get_graph(dag)
+    if not dot:
+        return None
     filename = f"dag-vis-{dag.dag_id}.gv"
     if "filename" in kwargs:
         filename = kwargs["filename"]
@@ -838,5 +871,14 @@ def _visualize_dag(dag: DAG, view: bool = True, **kwargs) -> Optional[str]:
         from dbgpt.configs.model_config import LOGDIR
 
         kwargs["directory"] = LOGDIR
+
+    # Generate Mermaid syntax file if requested
+    if generate_mermaid:
+        mermaid_filename = filename.replace(".gv", ".md")
+        with open(
+            f"{kwargs.get('directory', '')}/{mermaid_filename}", "w"
+        ) as mermaid_file:
+            logger.info(f"Writing Mermaid syntax to {mermaid_filename}")
+            mermaid_file.write(mermaid_str)
 
     return dot.render(filename, view=view, **kwargs)

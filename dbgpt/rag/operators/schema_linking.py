@@ -1,8 +1,13 @@
+"""Simple schema linking operator.
+
+Warning: This operator is in development and is not yet ready for production use.
+"""
+
 from typing import Any, Optional
 
 from dbgpt.core import LLMClient
 from dbgpt.core.awel import MapOperator
-from dbgpt.datasource.rdbms.base import RDBMSDatabase
+from dbgpt.datasource.base import BaseConnector
 from dbgpt.rag.schemalinker.schema_linking import SchemaLinking
 from dbgpt.storage.vector_store.connector import VectorStoreConnector
 
@@ -12,33 +17,36 @@ class SchemaLinkingOperator(MapOperator[Any, Any]):
 
     def __init__(
         self,
+        connector: BaseConnector,
+        model_name: str,
+        llm: LLMClient,
         top_k: int = 5,
-        connection: Optional[RDBMSDatabase] = None,
-        llm: Optional[LLMClient] = None,
-        model_name: Optional[str] = None,
         vector_store_connector: Optional[VectorStoreConnector] = None,
         **kwargs
     ):
-        """Init the schema linking operator
+        """Create the schema linking operator.
+
         Args:
-            connection (RDBMSDatabase): The connection.
+            connector (BaseConnector): The connection.
             llm (Optional[LLMClient]): base llm
         """
         super().__init__(**kwargs)
 
         self._schema_linking = SchemaLinking(
             top_k=top_k,
-            connection=connection,
+            connector=connector,
             llm=llm,
             model_name=model_name,
             vector_store_connector=vector_store_connector,
         )
 
     async def map(self, query: str) -> str:
-        """retrieve table schemas.
+        """Retrieve the table schemas with llm.
+
         Args:
             query (str): query.
+
         Return:
-            str: schema info
+            str: schema information.
         """
         return str(await self._schema_linking.schema_linking_with_llm(query))

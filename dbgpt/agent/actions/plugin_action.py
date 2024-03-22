@@ -83,10 +83,10 @@ class PluginAction(Action[PluginInput]):
             if not resource_plugin_client:
                 raise ValueError("No implementation of the use of plug-in resources！")
             response_success = True
-            status = Status.TODO.value
+            status = Status.RUNNING.value
+            tool_result = ""
             err_msg = None
             try:
-                status = Status.RUNNING.value
                 tool_result = await resource_plugin_client.a_execute_command(
                     param.tool_name, param.args, plugin_generator
                 )
@@ -106,7 +106,7 @@ class PluginAction(Action[PluginInput]):
                 "err_msg": err_msg,
             }
 
-            view = await self.render_protocal.disply(content=plugin_param)
+            view = await self.render_protocal.display(content=plugin_param)
 
             return ActionOutput(
                 is_exe_success=response_success, content=tool_result, view=view

@@ -1,31 +1,15 @@
-import os
-from typing import Dict, List
-
-from pydantic import BaseModel, Field
-
-from dbgpt._private.config import Config
-from dbgpt.configs.model_config import EMBEDDING_MODEL_CONFIG, MODEL_PATH, PILOT_PATH
-from dbgpt.core.awel import DAG, HttpTrigger, JoinOperator, MapOperator
-from dbgpt.datasource.rdbms.conn_sqlite import SQLiteTempConnect
-from dbgpt.rag.chunk import Chunk
-from dbgpt.rag.embedding.embedding_factory import DefaultEmbeddingFactory
-from dbgpt.rag.operators.db_schema import DBSchemaRetrieverOperator
-from dbgpt.serve.rag.operators.db_schema import DBSchemaAssemblerOperator
-from dbgpt.storage.vector_store.chroma_store import ChromaVectorConfig
-from dbgpt.storage.vector_store.connector import VectorStoreConnector
-
 """AWEL: Simple rag db schema embedding operator example
 
     if you not set vector_store_connector, it will return all tables schema in database.
     ```
     retriever_task = DBSchemaRetrieverOperator(
-        connection=_create_temporary_connection()
+        connector=_create_temporary_connection()
     )
     ```
     if you set vector_store_connector, it will recall topk similarity tables schema in database.
     ```
     retriever_task = DBSchemaRetrieverOperator(
-        connection=_create_temporary_connection()
+        connector=_create_temporary_connection()
         top_k=1,
         vector_store_connector=vector_store_connector
     )
@@ -38,6 +22,20 @@ from dbgpt.storage.vector_store.connector import VectorStoreConnector
             --data '{"query": "what is user name?"}'
 """
 
+import os
+from typing import Dict, List
+
+from pydantic import BaseModel, Field
+
+from dbgpt._private.config import Config
+from dbgpt.configs.model_config import EMBEDDING_MODEL_CONFIG, PILOT_PATH
+from dbgpt.core import Chunk
+from dbgpt.core.awel import DAG, HttpTrigger, InputOperator, JoinOperator, MapOperator
+from dbgpt.datasource.rdbms.conn_sqlite import SQLiteTempConnector
+from dbgpt.rag.embedding import DefaultEmbeddingFactory
+from dbgpt.rag.operators import DBSchemaAssemblerOperator, DBSchemaRetrieverOperator
+from dbgpt.storage.vector_store.chroma_store import ChromaVectorConfig
+from dbgpt.storage.vector_store.connector import VectorStoreConnector
 
 CFG = Config()
 
@@ -58,7 +56,7 @@ def _create_vector_connector():
 
 def _create_temporary_connection():
     """Create a temporary database connection for testing."""
-    connect = SQLiteTempConnect.create_temporary_db()
+    connect = SQLiteTempConnector.create_temporary_db()
     connect.create_temp_tables(
         {
             "user": {
@@ -108,18 +106,19 @@ with DAG("simple_rag_db_schema_example") as dag:
     request_handle_task = RequestHandleOperator()
     query_operator = MapOperator(lambda request: request["query"])
     vector_store_connector = _create_vector_connector()
+    connector = _create_temporary_connection()
     assembler_task = DBSchemaAssemblerOperator(
-        connection=_create_temporary_connection(),
+        connector=connector,
         vector_store_connector=vector_store_connector,
     )
     join_operator = JoinOperator(combine_function=_join_fn)
     retriever_task = DBSchemaRetrieverOperator(
-        connection=_create_temporary_connection(),
+        connector=_create_temporary_connection(),
         top_k=1,
         vector_store_connector=vector_store_connector,
     )
     result_parse_task = MapOperator(lambda chunks: [chunk.content for chunk in chunks])
-    trigger >> request_handle_task >> assembler_task >> join_operator
+    trigger >> assembler_task >> join_operator
     trigger >> request_handle_task >> query_operator >> join_operator
     join_operator >> retriever_task >> result_parse_task
 

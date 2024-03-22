@@ -31,7 +31,7 @@ def async_db_summary(system_app: SystemApp):
 
 
 def server_init(param: "WebServerParameters", system_app: SystemApp):
-    from dbgpt.agent.plugin.commands.command_mange import CommandRegistry
+    from dbgpt.agent.plugin.commands.command_manage import CommandRegistry
 
     # logger.info(f"args: {args}")
     # init config
@@ -58,27 +58,20 @@ def server_init(param: "WebServerParameters", system_app: SystemApp):
 
     cfg.command_registry = command_registry
 
-    command_disply_commands = [
-        "dbgpt.agent.plugin.commands.built_in.disply_type.show_chart_gen",
-        "dbgpt.agent.plugin.commands.built_in.disply_type.show_table_gen",
-        "dbgpt.agent.plugin.commands.built_in.disply_type.show_text_gen",
+    command_dispaly_commands = [
+        "dbgpt.agent.plugin.commands.built_in.display_type.show_chart_gen",
+        "dbgpt.agent.plugin.commands.built_in.display_type.show_table_gen",
+        "dbgpt.agent.plugin.commands.built_in.display_type.show_text_gen",
     ]
-    command_disply_registry = CommandRegistry()
-    for command in command_disply_commands:
-        command_disply_registry.import_commands(command)
-    cfg.command_disply = command_disply_registry
+    command_dispaly_registry = CommandRegistry()
+    for command in command_dispaly_commands:
+        command_dispaly_registry.import_commands(command)
+    cfg.command_display = command_dispaly_commands
 
 
 def _create_model_start_listener(system_app: SystemApp):
-    from dbgpt.datasource.manages.connection_manager import ConnectManager
-
-    cfg = Config()
-
     def startup_event(wh):
-        # init connect manage
         print("begin run _add_app_startup_event")
-        conn_manage = ConnectManager(system_app)
-        cfg.LOCAL_DB_MANAGE = conn_manage
         async_db_summary(system_app)
 
     return startup_event

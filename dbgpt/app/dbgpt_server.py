@@ -89,19 +89,25 @@ def mount_routers(app: FastAPI):
         router as api_editor_route_v1,
     )
     from dbgpt.app.openapi.api_v1.feedback.api_fb_v1 import router as api_fb_v1
+    from dbgpt.app.openapi.api_v2 import router as api_v2
     from dbgpt.serve.agent.app.controller import router as gpts_v1
+    from dbgpt.serve.agent.app.endpoints import router as app_v2
 
     app.include_router(api_v1, prefix="/api", tags=["Chat"])
+    app.include_router(api_v2, prefix="/api", tags=["ChatV2"])
     app.include_router(api_editor_route_v1, prefix="/api", tags=["Editor"])
     app.include_router(llm_manage_api, prefix="/api", tags=["LLM Manage"])
     app.include_router(api_fb_v1, prefix="/api", tags=["FeedBack"])
     app.include_router(gpts_v1, prefix="/api", tags=["GptsApp"])
+    app.include_router(app_v2, prefix="/api", tags=["App"])
 
     app.include_router(knowledge_router, tags=["Knowledge"])
 
 
 def mount_static_files(app: FastAPI):
-    from dbgpt.agent.plugin.commands.built_in.disply_type import static_message_img_path
+    from dbgpt.agent.plugin.commands.built_in.display_type import (
+        static_message_img_path,
+    )
 
     os.makedirs(static_message_img_path, exist_ok=True)
     app.mount(

@@ -411,6 +411,7 @@ class Service(BaseService[ServeEntity, ServeRequest, ServerResponse]):
         end_node = cast(BaseOperator, leaf_nodes[0])
         async for output in _chat_with_dag_task(end_node, request, incremental):
             yield output
+        await dag._after_dag_end()
 
     def _parse_flow_category(self, dag: DAG) -> FlowCategory:
         """Parse the flow category
@@ -484,9 +485,7 @@ async def _chat_with_dag_task(
             if OpenAIStreamingOutputOperator and isinstance(
                 task, OpenAIStreamingOutputOperator
             ):
-                from fastchat.protocol.openai_api_protocol import (
-                    ChatCompletionResponseStreamChoice,
-                )
+                from dbgpt.core.schema.api import ChatCompletionResponseStreamChoice
 
                 previous_text = ""
                 async for output in await task.call_stream(request):

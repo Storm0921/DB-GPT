@@ -1,24 +1,23 @@
-from typing import Any, List, Optional
+"""The Rerank Operator."""
+from typing import List, Optional
 
-from dbgpt.core import LLMClient
+from dbgpt.core import Chunk
 from dbgpt.core.awel import MapOperator
-from dbgpt.core.awel.task.base import IN
-from dbgpt.rag.chunk import Chunk
-from dbgpt.rag.retriever.rerank import DefaultRanker
-from dbgpt.rag.retriever.rewrite import QueryRewrite
+from dbgpt.rag.retriever.rerank import RANK_FUNC, DefaultRanker
 
 
-class RerankOperator(MapOperator[Any, Any]):
+class RerankOperator(MapOperator[List[Chunk], List[Chunk]]):
     """The Rewrite Operator."""
 
     def __init__(
         self,
-        topk: Optional[int] = 3,
-        algorithm: Optional[str] = "default",
-        rank_fn: Optional[callable] = None,
+        topk: int = 3,
+        algorithm: str = "default",
+        rank_fn: Optional[RANK_FUNC] = None,
         **kwargs
     ):
-        """Init the query rewrite operator.
+        """Create a new RerankOperator.
+
         Args:
             topk (int): The number of the candidates.
             algorithm (Optional[str]): The rerank algorithm name.
@@ -31,10 +30,11 @@ class RerankOperator(MapOperator[Any, Any]):
             rank_fn=rank_fn,
         )
 
-    async def map(self, candidates_with_scores: IN) -> List[Chunk]:
-        """rerank the candidates.
+    async def map(self, candidates_with_scores: List[Chunk]) -> List[Chunk]:
+        """Rerank the candidates.
+
         Args:
-            candidates_with_scores (IN): The candidates with scores.
+            candidates_with_scores (List[Chunk]): The candidates with scores.
         Returns:
             List[Chunk]: The reranked candidates.
         """
